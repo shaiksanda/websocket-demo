@@ -1,39 +1,76 @@
 const { v4: uuidv4 } = require("uuid");
-const WebSocket = require('ws'); // load the 'ws' library
-// create a WebSocket server that listens on port 8080
-const wss = new WebSocket.Server({ port: 6002 }, () => {
-    console.log('WebSocket server listening on ws://localhost:6002');
+const WebSocket = require('ws');
+
+// Create WebSocket server
+const PORT = process.env.PORT || 6002;
+const wss = new WebSocket.Server({ port: PORT }, () => {
+    console.log(`WebSocket server listening on ws://localhost:${PORT}`);
 });
 
+// Broadcast message to all clients except sender
 const broadcast = (senderId, message) => {
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.id !== senderId) {
-            client.send(`Client ${senderId}: ${message}`);
+            try {
+                client.send(JSON.stringify({
+                    type: "broadcast",
+                    from: senderId,
+                    message
+                }));
+            } catch (err) {
+                console.error(`Error sending message to Client ${client.id}: ${err.message}`);
+            }
         }
     });
 };
 
-
+// Handle client connections
 wss.on("connection", (ws) => {
-    ws.id = uuidv4()
+    ws.id = uuidv4();
     console.log(`New Client Connected (ID: ${ws.id})  Total clients: ${wss.clients.size}`);
 
-    ws.send(`Welcome! You are Client ${ws.id}`);
+    // Welcome message
+    ws.send(JSON.stringify({
+        type: "welcome",
+        message: `Welcome! You are Client ${ws.id}`
+    }));
 
+    // Handle incoming messages
     ws.on("message", (msg) => {
-        console.log(`Message From Client ${ws.id}: ${msg}`);
-        
-        ws.send(`Server Received: ${msg}`);
-
-        broadcast(ws.id, msg)
+        try {
+            console.log(`Message From Client ${ws.id}: ${msg}`);
+            // Echo back to sender
+            ws.send(JSON.stringify({
+                type: "ack",
+                message: `Server Received: ${msg}`
+            }));
+            // Broadcast to others
+            broadcast(ws.id, msg);
+        } catch (err) {
+            console.error(`Error processing message from Client ${ws.id}: ${err.message}`);
+            ws.send(JSON.stringify({
+                type: "error",
+                message: err.message
+            }));
+        }
     });
 
+    // Handle client disconnect
     ws.on("close", () => {
-        console.log(`A Client ${ws.id} Disconnected,  Total clients: ${wss.clients.size}`);
-        
+        console.log(`Client ${ws.id} Disconnected  Total clients: ${wss.clients.size}`);
     });
 
+    // Handle client errors
     ws.on("error", (err) => {
-        console.log(`WebSocket Error from Client ${ws.id}: ${err}`);
+        console.error(`WebSocket Error from Client ${ws.id}: ${err.message}`);
+        ws.send(JSON.stringify({
+            type: "error",
+            message: `Server Error: ${err.message}`
+        }));
     });
-})
+});
+
+// Handle server errors globally
+wss.on("error", (err) => {
+    console.error(`WebSocket Server Error: ${err.message}`);
+});
